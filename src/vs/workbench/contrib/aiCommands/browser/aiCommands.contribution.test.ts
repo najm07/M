@@ -4,7 +4,6 @@
  *--------------------------------------------------------------------------------------------*/
 
 import assert from 'assert';
-import { suite, test } from 'mocha';
 
 suite('AICommands Contribution', () => {
 	test('command palette opens on Ctrl+Shift+/', () => {

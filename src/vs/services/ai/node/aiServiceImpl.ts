@@ -9,7 +9,7 @@ import { Disposable, IDisposable, MutableDisposable } from '../../../base/common
 import { Emitter, Event } from '../../../base/common/event.js';
 import { URI } from '../../../base/common/uri.js';
 import { VSBuffer } from '../../../base/common/buffer.js';
-import { joinPath } from '../../../base/common/resources.js';
+import { joinPath, dirname } from '../../../base/common/resources.js';
 import { isString } from '../../../base/common/types.js';
 import { FileChangesEvent, FileOperationError, FileOperationResult, IFileService } from '../../../platform/files/common/files.js';
 import { ILogService } from '../../../platform/log/common/log.js';
@@ -17,6 +17,8 @@ import { INativeEnvironmentService } from '../../../platform/environment/common/
 import { IStorageService, StorageScope, StorageTarget } from '../../../platform/storage/common/storage.js';
 import { AICompletionRequest, AIStreamRequest, IAIService } from '../common/aiService.js';
 import { AIDiff, AICompletionChunk, AICompletionResponse, AIModelConfiguration, AIStreamHandle } from '../common/aiTypes.js';
+import { OllamaAdapter } from './ollamaAdapter.js';
+import { CloudAIAdapter } from './cloudAIAdapter.js';
 
 const MODEL_CONFIG_STORAGE_KEY = 'workbench.ai.activeModelId';
 
@@ -43,6 +45,7 @@ export class AIService extends Disposable implements IAIService {
 	private readonly _configListener = this._register(new MutableDisposable<IDisposable>());
 	private _models: AIModelConfiguration[] = [];
 	private _activeModelId: string | undefined;
+	private readonly _adapters = new Map<string, OllamaAdapter | CloudAIAdapter>();
 
 	private readonly _onDidChangeActiveModel = new Emitter<string>();
 	private readonly _onDidUpdateModelRegistry = new Emitter<void>();
@@ -67,8 +70,87 @@ export class AIService extends Disposable implements IAIService {
 		this._onDidUpdateModelRegistry.dispose();
 	}
 
-	async requestCompletion(request: AICompletionRequest, _token: CancellationToken): Promise<AICompletionResponse> {
-		throw new Error(`AIService requestCompletion not yet implemented for model '${request.modelId}'`);
+	async requestCompletion(request: AICompletionRequest, token: CancellationToken): Promise<AICompletionResponse> {
+		const model = this._models.find(m => m.id === request.modelId);
+		if (!model) {
+			throw new Error(`Unknown AI model '${request.modelId}'`);
+		}
+
+		// Get or create adapter for this model
+		let adapter = this._adapters.get(request.modelId);
+		if (!adapter) {
+			adapter = this.createAdapter(model);
+			if (adapter) {
+				this._adapters.set(request.modelId, adapter);
+			}
+		}
+
+		if (!adapter) {
+			throw new Error(`No adapter available for model '${request.modelId}'`);
+		}
+
+		// Try local first (Ollama), then fallback to cloud
+		if (adapter instanceof OllamaAdapter) {
+			try {
+				// Check if Ollama is available
+				const isHealthy = await adapter.healthCheck(token);
+				if (isHealthy) {
+					this.logService.debug(`[AIService] Using local Ollama model: ${request.modelId}`);
+					return await adapter.generate(request, token);
+				} else {
+					this.logService.warn(`[AIService] Ollama not available, falling back to cloud for model: ${request.modelId}`);
+					// Try to find a cloud fallback
+					const cloudModel = this.findCloudFallback(model);
+					if (cloudModel) {
+						this.logService.info(`[AIService] Falling back to cloud model: ${cloudModel.id}`);
+						const cloudAdapter = this.createAdapter(cloudModel);
+						if (cloudAdapter && cloudAdapter instanceof CloudAIAdapter) {
+							return await cloudAdapter.generate({ ...request, modelId: cloudModel.id }, token);
+						}
+					}
+				}
+			} catch (error) {
+				this.logService.warn(`[AIService] Ollama request failed, falling back to cloud: ${error instanceof Error ? error.message : String(error)}`);
+				// Try to find a cloud fallback
+				const cloudModel = this.findCloudFallback(model);
+				if (cloudModel) {
+					this.logService.info(`[AIService] Falling back to cloud model: ${cloudModel.id}`);
+					const cloudAdapter = this.createAdapter(cloudModel);
+					if (cloudAdapter && cloudAdapter instanceof CloudAIAdapter) {
+						return await cloudAdapter.generate({ ...request, modelId: cloudModel.id }, token);
+					}
+				}
+			}
+		}
+
+		// Use cloud adapter directly if it's a cloud model
+		if (adapter instanceof CloudAIAdapter) {
+			this.logService.debug(`[AIService] Using cloud AI model: ${request.modelId}`);
+			return await adapter.generate(request, token);
+		}
+
+		throw new Error(`Failed to generate completion for model '${request.modelId}'`);
+	}
+
+	private createAdapter(config: AIModelConfiguration): OllamaAdapter | CloudAIAdapter | undefined {
+		if (OllamaAdapter.canHandle(config)) {
+			return new OllamaAdapter(config, this.logService);
+		} else if (CloudAIAdapter.canHandle(config)) {
+			return new CloudAIAdapter(config, this.logService);
+		}
+		return undefined;
+	}
+
+	private findCloudFallback(localModel: AIModelConfiguration): AIModelConfiguration | undefined {
+		// Try to find a cloud model with similar name or same family preference
+		// For now, just return the first cloud model as fallback
+		return this._models.find(m => {
+			if (m.id === localModel.id) {
+				return false;
+			}
+			const family = m.family?.toLowerCase();
+			return family === 'openai' || family === 'anthropic';
+		});
 	}
 
 	streamResponse(request: AIStreamRequest, _token: CancellationToken): AIStreamHandle {
@@ -110,6 +192,15 @@ export class AIService extends Disposable implements IAIService {
 			const parsed = this.parseConfig(file.value);
 			this._models = parsed;
 
+			// Clear old adapters and create new ones
+			this._adapters.clear();
+			for (const model of this._models) {
+				const adapter = this.createAdapter(model);
+				if (adapter) {
+					this._adapters.set(model.id, adapter);
+				}
+			}
+
 			if (this._models.length > 0) {
 				const active = this._activeModelId && this._models.some(model => model.id === this._activeModelId)
 					? this._activeModelId
@@ -130,9 +221,54 @@ export class AIService extends Disposable implements IAIService {
 			this._onDidUpdateModelRegistry.fire();
 		} catch (error) {
 			if (error instanceof FileOperationError && error.fileOperationResult === FileOperationResult.FILE_NOT_FOUND) {
-				this.logService.info('[AIService] Model configuration not found; using empty registry.');
-				this._models = [];
-				this._activeModelId = undefined;
+				// Create default config file automatically
+				try {
+					await this.createDefaultConfig(configUri);
+					// Try to reload again after creating default config
+					try {
+						const file = await this.fileService.readFile(configUri);
+						const parsed = this.parseConfig(file.value);
+						this._models = parsed;
+
+						// Clear old adapters and create new ones
+						this._adapters.clear();
+						for (const model of this._models) {
+							const adapter = this.createAdapter(model);
+							if (adapter) {
+								this._adapters.set(model.id, adapter);
+							}
+						}
+
+						if (this._models.length > 0) {
+							const active = this._activeModelId && this._models.some(model => model.id === this._activeModelId)
+								? this._activeModelId
+								: this._models.find(model => model.isDefault)?.id ?? this._models[0].id;
+
+							if (active !== this._activeModelId) {
+								this._activeModelId = active;
+								if (active) {
+									this.storageService.store(MODEL_CONFIG_STORAGE_KEY, active, StorageScope.PROFILE, StorageTarget.USER);
+									this._onDidChangeActiveModel.fire(active);
+								}
+							}
+						} else {
+							this._activeModelId = undefined;
+						}
+
+						this.logService.info('[AIService] Created default configuration file at ' + configUri.toString());
+					} catch (reloadError) {
+						this.logService.warn('[AIService] Failed to reload configuration after creating default file', reloadError);
+						this._models = [];
+						this._activeModelId = undefined;
+						this._adapters.clear();
+					}
+				} catch (createError) {
+					this.logService.warn('[AIService] Failed to create default configuration file', createError);
+					this.logService.info('[AIService] Model configuration not found; using empty registry.');
+					this._models = [];
+					this._activeModelId = undefined;
+					this._adapters.clear();
+				}
 				this.registerConfigWatcher(configUri);
 				this._onDidUpdateModelRegistry.fire();
 				return;
@@ -209,8 +345,130 @@ export class AIService extends Disposable implements IAIService {
 		}
 	}
 
-	private getConfigUri(): URI {
+	getConfigUri(): URI {
 		return joinPath(this.environmentService.userHome, '.void', 'config.json');
+	}
+
+	async addModel(model: Omit<AIModelConfiguration, 'api'> & { api: string }): Promise<void> {
+		const configUri = this.getConfigUri();
+
+		// Read current config
+		let config: any;
+		try {
+			const file = await this.fileService.readFile(configUri);
+			config = JSON.parse(file.value.toString());
+		} catch (error) {
+			if (error instanceof FileOperationError && error.fileOperationResult === FileOperationResult.FILE_NOT_FOUND) {
+				await this.createDefaultConfig(configUri);
+				config = { models: {} };
+			} else {
+				throw error;
+			}
+		}
+
+		if (!config.models) {
+			config.models = {};
+		}
+
+		// Add new model
+		config.models[model.id] = {
+			api: model.api,
+			key: model.apiKey,
+			family: model.family,
+			default: model.isDefault,
+			metadata: model.metadata,
+		};
+
+		// Write back
+		await this.fileService.writeFile(configUri, VSBuffer.fromString(JSON.stringify(config, null, 2)));
+
+		// Reload configuration
+		await this.reloadModelConfiguration();
+	}
+
+	async removeModel(modelId: string): Promise<void> {
+		const configUri = this.getConfigUri();
+
+		// Read current config
+		const file = await this.fileService.readFile(configUri);
+		const config = JSON.parse(file.value.toString());
+
+		if (!config.models || !config.models[modelId]) {
+			throw new Error(`Model '${modelId}' not found`);
+		}
+
+		// Remove model
+		delete config.models[modelId];
+
+		// If this was the active model, clear it
+		if (this._activeModelId === modelId) {
+			this._activeModelId = undefined;
+			this.storageService.remove(MODEL_CONFIG_STORAGE_KEY, StorageScope.PROFILE);
+		}
+
+		// Write back
+		await this.fileService.writeFile(configUri, VSBuffer.fromString(JSON.stringify(config, null, 2)));
+
+		// Reload configuration
+		await this.reloadModelConfiguration();
+	}
+
+	async updateModel(modelId: string, updates: Partial<Omit<AIModelConfiguration, 'id' | 'api'> & { api?: string }>): Promise<void> {
+		const configUri = this.getConfigUri();
+
+		// Read current config
+		const file = await this.fileService.readFile(configUri);
+		const config = JSON.parse(file.value.toString());
+
+		if (!config.models || !config.models[modelId]) {
+			throw new Error(`Model '${modelId}' not found`);
+		}
+
+		// Update model
+		const model = config.models[modelId];
+		if (updates.api !== undefined) {
+			model.api = updates.api;
+		}
+		if (updates.apiKey !== undefined) {
+			model.key = updates.apiKey;
+		}
+		if (updates.family !== undefined) {
+			model.family = updates.family;
+		}
+		if (updates.isDefault !== undefined) {
+			model.default = updates.isDefault;
+		}
+		if (updates.metadata !== undefined) {
+			model.metadata = updates.metadata;
+		}
+
+		// Write back
+		await this.fileService.writeFile(configUri, VSBuffer.fromString(JSON.stringify(config, null, 2)));
+
+		// Reload configuration
+		await this.reloadModelConfiguration();
+	}
+
+	private async createDefaultConfig(configUri: URI): Promise<void> {
+		try {
+			// Ensure directory exists
+			const dirUri = dirname(configUri);
+			if (!(await this.fileService.exists(dirUri))) {
+				await this.fileService.createFolder(dirUri);
+			}
+
+			// Create default config with helpful template
+			// Note: JSON doesn't support comments, so we create a minimal valid structure
+			// Users can add their models following the examples in the documentation
+			const defaultConfig = {
+				models: {}
+			};
+
+			await this.fileService.writeFile(configUri, VSBuffer.fromString(JSON.stringify(defaultConfig, null, 2)));
+		} catch (error) {
+			this.logService.warn('[AIService] Failed to create default configuration file', error);
+			throw error;
+		}
 	}
 }
 

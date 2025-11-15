@@ -4,7 +4,6 @@
  *--------------------------------------------------------------------------------------------*/
 
 import assert from 'assert';
-import { suite, test } from 'mocha';
 
 suite('AIAgents Contribution', () => {
 	test('execute command prompts for task description', async () => {

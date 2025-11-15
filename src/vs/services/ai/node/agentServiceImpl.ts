@@ -11,8 +11,10 @@ import { IAgentService, AgentTask, AgentTaskStatus, AgentStep, AgentStepType, Ag
 import { IAIService } from '../common/aiService.js';
 import { IContextService } from '../common/contextService.js';
 import { ILogService } from '../../../platform/log/common/log.js';
-import { ICommandService } from '../../../platform/commands/common/commands.js';
 import { generateUuid } from '../../../base/common/uuid.js';
+import { AgentSandbox } from './agentSandbox.js';
+import { IFileService } from '../../../platform/files/common/files.js';
+import { IEnvironmentService } from '../../../platform/environment/common/environment.js';
 
 export class AgentService extends Disposable implements IAgentService {
 	declare _serviceBrand: undefined;
@@ -26,13 +28,18 @@ export class AgentService extends Disposable implements IAgentService {
 	public readonly onDidTaskUpdate: Event<AgentTask> = this._onDidTaskUpdate.event;
 	public readonly onDidTaskComplete: Event<AgentTask> = this._onDidTaskComplete.event;
 
+	private readonly sandbox: AgentSandbox;
+
 	constructor(
 		@IAIService private readonly aiService: IAIService,
 		@IContextService private readonly contextService: IContextService,
 		@ILogService private readonly logService: ILogService,
-		@ICommandService private readonly commandService: ICommandService,
+		@IFileService private readonly fileService: IFileService,
+		@IEnvironmentService private readonly environmentService: IEnvironmentService,
 	) {
 		super();
+		this.sandbox = new AgentSandbox(this.fileService, this.environmentService, this.logService);
+		this._register(this.sandbox);
 	}
 
 	override dispose(): void {
@@ -301,22 +308,83 @@ Respond with a JSON array of steps, each with:
 	}
 
 	private async executeTestStep(step: AgentStep, context: URI, token: CancellationToken): Promise<any> {
-		// Execute test command
-		try {
-			await this.commandService.executeCommand('workbench.action.terminal.runSelectedText');
-			return { testsRun: true };
-		} catch (error) {
-			// Fallback: just return success for now
-			return { testsRun: false, note: 'Test execution not fully implemented' };
+		// Extract test command from step description or use default
+		const testCommand = this.extractTestCommand(step.name) || 'npm test';
+
+		this.logService.info(`[AgentService] Executing test in sandbox: ${testCommand}`);
+
+		// Execute tests in sandbox
+		const result = await this.sandbox.executeTests(testCommand, {
+			timeout: 60000, // 60 seconds
+			workingDirectory: context,
+			allowedCommands: [
+				'npm test',
+				'npm run test',
+				'npx jest',
+				'npx mocha',
+				'npx vitest',
+				'python -m pytest',
+			],
+		}, token);
+
+		if (!result.success) {
+			throw new Error(`Tests failed: ${result.stderr || result.stdout}`);
 		}
+
+		return {
+			testsRun: true,
+			success: result.success,
+			stdout: result.stdout,
+			duration: result.duration,
+		};
 	}
 
 	private async executeVerifyStep(step: AgentStep, context: URI, token: CancellationToken): Promise<any> {
-		// Verify changes - could check syntax, run linter, etc.
-		return {
-			verified: true,
-			note: 'Verification step completed',
-		};
+		// Validate changes before applying
+		// In a full implementation, this would get the generated changes from previous steps
+		// For now, we validate any files that were modified
+
+		try {
+			// Read files that might have been changed (this is a simplified version)
+			// In practice, the agent would track which files were modified
+			const validationResult = await this.sandbox.validateChanges([], {
+				workingDirectory: context,
+			}, token);
+
+			if (!validationResult.valid) {
+				throw new Error(`Validation failed: ${validationResult.errors.join(', ')}`);
+			}
+
+			return {
+				verified: true,
+				errors: validationResult.errors,
+			};
+		} catch (error) {
+			this.logService.warn('[AgentService] Verification step failed', error);
+			// Don't fail the entire task on verification failure, just log it
+			return {
+				verified: false,
+				error: error instanceof Error ? error.message : String(error),
+			};
+		}
+	}
+
+	private extractTestCommand(description: string): string | undefined {
+		// Try to extract test command from description
+		const patterns = [
+			/run\s+(?:tests?|test\s+command)[:]\s*(.+)/i,
+			/test\s+command[:\s]+(.+)/i,
+			/execute[:\s]+(.+test.+)/i,
+		];
+
+		for (const pattern of patterns) {
+			const match = description.match(pattern);
+			if (match && match[1]) {
+				return match[1].trim();
+			}
+		}
+
+		return undefined;
 	}
 
 	private updateTask(taskId: string, updates: Partial<AgentTask>): void {

@@ -287,3 +287,296 @@ registerAction2(class extends Action2 {
 	}
 });
 
+// Command: Switch AI Model
+registerAction2(class extends Action2 {
+	constructor() {
+		super({
+			id: 'ai.model.switch',
+			title: { value: localize('ai.model.switch', 'Switch AI Model'), original: 'Switch AI Model' },
+			category: localize('ai.category', 'AI'),
+			keybinding: {
+				primary: KeyMod.CtrlCmd | KeyMod.Alt | KeyCode.KeyM,
+				weight: KeybindingWeight.WorkbenchContrib,
+			},
+		});
+	}
+
+	async run(accessor: ServicesAccessor): Promise<void> {
+		const aiService = accessor.get(IAIService);
+		const quickInputService = accessor.get(IQuickInputService);
+		const notificationService = accessor.get(INotificationService);
+
+		const models = aiService.getModels();
+		if (models.length === 0) {
+			notificationService.warn(localize('ai.noModels', 'No AI models configured. Please configure models in ~/.void/config.json'));
+			return;
+		}
+
+		const activeModelId = aiService.getActiveModel();
+		const items: IQuickPickItem[] = models.map(model => ({
+			label: model.id,
+			description: model.family || model.api.toString(),
+			id: model.id,
+			picked: model.id === activeModelId,
+		}));
+
+		const selected = await quickInputService.pick(items, {
+			placeHolder: localize('ai.model.select', 'Select an AI model'),
+		});
+
+		if (selected && selected.id) {
+			await aiService.setActiveModel(selected.id);
+			notificationService.info(localize('ai.model.switched', 'Switched to model: {0}', selected.id));
+		}
+	}
+});
+
+// Command: Open AI Config File
+registerAction2(class extends Action2 {
+	constructor() {
+		super({
+			id: 'ai.config.open',
+			title: { value: localize('ai.config.open', 'Open AI Configuration File'), original: 'Open AI Configuration File' },
+			category: { value: localize('ai.category', 'AI'), original: 'AI' },
+			f1: true,
+		});
+	}
+
+	async run(accessor: ServicesAccessor): Promise<void> {
+		const aiService = accessor.get(IAIService);
+		const editorService = accessor.get(IEditorService);
+		const notificationService = accessor.get(INotificationService);
+
+		try {
+			const configUri = aiService.getConfigUri();
+			await editorService.openEditor({
+				resource: configUri,
+				options: { revealIfOpened: true, pinned: true },
+			});
+		} catch (error) {
+			notificationService.error(localize('ai.config.openError', 'Failed to open configuration file: {0}', error instanceof Error ? error.message : String(error)));
+		}
+	}
+});
+
+// Command: Add AI Model
+registerAction2(class extends Action2 {
+	constructor() {
+		super({
+			id: 'ai.model.add',
+			title: { value: localize('ai.model.add', 'Add AI Model'), original: 'Add AI Model' },
+			category: { value: localize('ai.category', 'AI'), original: 'AI' },
+			f1: true,
+		});
+	}
+
+	async run(accessor: ServicesAccessor): Promise<void> {
+		const aiService = accessor.get(IAIService);
+		const quickInputService = accessor.get(IQuickInputService);
+		const notificationService = accessor.get(INotificationService);
+		const logService = accessor.get(ILogService);
+
+		try {
+			// Step 1: Model ID
+			const modelId = await quickInputService.input({
+				title: localize('ai.model.add.step1', 'Add AI Model (1/4)'),
+				placeHolder: localize('ai.model.id.placeholder', 'Enter a unique model ID (e.g., ollama-llama3)'),
+				validateInput: async (value) => {
+					if (!value || value.trim().length === 0) {
+						return localize('ai.model.id.required', 'Model ID is required');
+					}
+					if (aiService.getModels().some(m => m.id === value.trim())) {
+						return localize('ai.model.id.exists', 'A model with this ID already exists');
+					}
+					return undefined;
+				},
+			});
+
+			if (!modelId) {
+				return;
+			}
+
+			// Step 2: API URL
+			const apiUrl = await quickInputService.input({
+				title: localize('ai.model.add.step2', 'Add AI Model (2/4)'),
+				placeHolder: localize('ai.model.api.placeholder', 'Enter API URL (e.g., http://localhost:11434 or https://api.openai.com/v1)'),
+				validateInput: async (value) => {
+					if (!value || value.trim().length === 0) {
+						return localize('ai.model.api.required', 'API URL is required');
+					}
+					try {
+						new URL(value.trim());
+					} catch {
+						return localize('ai.model.api.invalid', 'Invalid URL format');
+					}
+					return undefined;
+				},
+			});
+
+			if (!apiUrl) {
+				return;
+			}
+
+			// Step 3: Family (optional)
+			const familyItems: IQuickPickItem[] = [
+				{ label: localize('ai.model.family.ollama', 'Ollama'), id: 'ollama' },
+				{ label: localize('ai.model.family.openai', 'OpenAI'), id: 'openai' },
+				{ label: localize('ai.model.family.anthropic', 'Anthropic'), id: 'anthropic' },
+				{ label: localize('ai.model.family.custom', 'Custom'), id: 'custom' },
+				{ label: localize('ai.model.family.skip', 'Skip (Optional)'), id: '' },
+			];
+
+			const familySelected = await quickInputService.pick(familyItems, {
+				placeHolder: localize('ai.model.family.placeholder', 'Select model family (optional)'),
+			});
+
+			const family = familySelected?.id || undefined;
+
+			// Step 4: API Key (optional, for cloud APIs)
+			let apiKey: string | undefined;
+			const needsApiKey = apiUrl.includes('api.openai.com') || apiUrl.includes('api.anthropic.com') || family === 'openai' || family === 'anthropic';
+
+			if (needsApiKey) {
+				const apiKeyInput = await quickInputService.input({
+					title: localize('ai.model.add.step4', 'Add AI Model (4/4)'),
+					placeHolder: localize('ai.model.key.placeholder', 'Enter API key (optional, can be set later)'),
+					password: true,
+				});
+				apiKey = apiKeyInput || undefined;
+			}
+
+			// Step 5: Set as default?
+			const defaultItems: IQuickPickItem[] = [
+				{ label: localize('ai.model.default.yes', 'Yes, set as default'), id: 'yes' },
+				{ label: localize('ai.model.default.no', 'No'), id: 'no' },
+			];
+
+			const defaultSelected = await quickInputService.pick(defaultItems, {
+				placeHolder: localize('ai.model.default.placeholder', 'Set as default model?'),
+			});
+
+			const isDefault = defaultSelected?.id === 'yes';
+
+			// Add the model
+			await aiService.addModel({
+				id: modelId.trim(),
+				api: apiUrl.trim(),
+				apiKey,
+				family,
+				isDefault,
+			});
+
+			notificationService.info(localize('ai.model.added', 'Successfully added model: {0}', modelId.trim()));
+		} catch (error) {
+			logService.error('[AICommands] Failed to add model', error);
+			notificationService.error(localize('ai.model.addError', 'Failed to add model: {0}', error instanceof Error ? error.message : String(error)));
+		}
+	}
+});
+
+// Command: Manage AI Models
+registerAction2(class extends Action2 {
+	constructor() {
+		super({
+			id: 'ai.model.manage',
+			title: { value: localize('ai.model.manage', 'Manage AI Models'), original: 'Manage AI Models' },
+			category: { value: localize('ai.category', 'AI'), original: 'AI' },
+			f1: true,
+		});
+	}
+
+	async run(accessor: ServicesAccessor): Promise<void> {
+		const aiService = accessor.get(IAIService);
+		const quickInputService = accessor.get(IQuickInputService);
+		const notificationService = accessor.get(INotificationService);
+		const logService = accessor.get(ILogService);
+		const commandService = accessor.get(ICommandService);
+
+		const models = aiService.getModels();
+		const activeModelId = aiService.getActiveModel();
+
+		if (models.length === 0) {
+			const addModel = await quickInputService.pick([{
+				label: localize('ai.model.add.first', 'Add your first AI model'),
+				id: 'add',
+			}], {
+				placeHolder: localize('ai.model.none', 'No models configured. Would you like to add one?'),
+			});
+
+			if (addModel?.id === 'add') {
+				await commandService.executeCommand('ai.model.add');
+			}
+			return;
+		}
+
+		const items: IQuickPickItem[] = models.map(model => ({
+			label: model.id,
+			description: `${model.family || 'Unknown'} • ${model.id === activeModelId ? localize('ai.model.active', 'Active') : ''}`,
+			id: model.id,
+			buttons: [{
+				iconClass: 'codicon codicon-trash',
+				tooltip: localize('ai.model.delete', 'Delete'),
+			}],
+		}));
+
+		items.push({
+			label: `$(plus) ${localize('ai.model.add.new', 'Add New Model')}`,
+			id: '__add__',
+			alwaysShow: true,
+		});
+
+		const selected = await quickInputService.pick(items, {
+			placeHolder: localize('ai.model.manage.placeholder', 'Select a model to manage'),
+		});
+
+		if (!selected) {
+			return;
+		}
+
+		if (selected.id === '__add__') {
+			await commandService.executeCommand('ai.model.add');
+			return;
+		}
+
+		// Show model actions
+		const model = models.find(m => m.id === selected.id);
+		if (!model) {
+			return;
+		}
+
+		const actions: IQuickPickItem[] = [
+			{ label: localize('ai.model.switch', 'Switch to this model'), id: 'switch' },
+			{ label: localize('ai.model.setDefault', 'Set as default'), id: 'default' },
+			{ label: localize('ai.model.delete', 'Delete'), id: 'delete' },
+		];
+
+		const action = await quickInputService.pick(actions, {
+			placeHolder: localize('ai.model.actions.placeholder', 'What would you like to do?'),
+		});
+
+		if (!action) {
+			return;
+		}
+
+		try {
+			switch (action.id) {
+				case 'switch':
+					await aiService.setActiveModel(model.id);
+					notificationService.info(localize('ai.model.switched', 'Switched to model: {0}', model.id));
+					break;
+				case 'default':
+					await aiService.updateModel(model.id, { isDefault: true });
+					notificationService.info(localize('ai.model.setDefault.success', 'Set {0} as default model', model.id));
+					break;
+				case 'delete':
+					await aiService.removeModel(model.id);
+					notificationService.info(localize('ai.model.deleted', 'Deleted model: {0}', model.id));
+					break;
+			}
+		} catch (error) {
+			logService.error('[AICommands] Failed to manage model', error);
+			notificationService.error(localize('ai.model.manageError', 'Failed to {0} model: {1}', action.id, error instanceof Error ? error.message : String(error)));
+		}
+	}
+});
+

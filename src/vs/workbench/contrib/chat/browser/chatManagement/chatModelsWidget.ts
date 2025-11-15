@@ -37,6 +37,7 @@ import { ICommandService } from '../../../../../platform/commands/common/command
 import { IEditorProgressService } from '../../../../../platform/progress/common/progress.js';
 import { IContextKey, IContextKeyService } from '../../../../../platform/contextkey/common/contextkey.js';
 import { CONTEXT_MODELS_SEARCH_FOCUS } from '../../common/constants.js';
+import { IAIService } from '../../../../../services/ai/common/aiService.js';
 
 const $ = DOM.$;
 
@@ -708,6 +709,7 @@ export class ChatModelsWidget extends Disposable {
 		@IEditorProgressService private readonly editorProgressService: IEditorProgressService,
 		@ICommandService private readonly commandService: ICommandService,
 		@IContextKeyService contextKeyService: IContextKeyService,
+		@IAIService private readonly aiService: IAIService,
 	) {
 		super();
 
@@ -726,6 +728,11 @@ export class ChatModelsWidget extends Disposable {
 		this.editorProgressService.showWhile(loadingPromise, 300);
 
 		this._register(this.viewModel.onDidChangeModelEntries(() => this.refreshTable()));
+
+		// Listen to AI service changes to refresh the table
+		this._register(this.aiService.onDidUpdateModelRegistry(() => {
+			this.refreshTable();
+		}));
 	}
 
 	private create(container: HTMLElement): void {
@@ -976,16 +983,31 @@ export class ChatModelsWidget extends Disposable {
 
 		this.table.splice(0, this.table.length, modelItems);
 
+		// Always enable the button and add "Add Custom Model" option
 		const hasPlan = this.chatEntitlementService.entitlement !== ChatEntitlement.Unknown && this.chatEntitlementService.entitlement !== ChatEntitlement.Available;
-		this.addButton.enabled = hasPlan && vendorsWithoutModels.length > 0;
+		const hasCustomModels = this.aiService.getModels().length > 0;
+		this.addButton.enabled = hasPlan && (vendorsWithoutModels.length > 0 || !hasCustomModels);
 
-		this.dropdownActions = vendorsWithoutModels.map(vendor => toAction({
-			id: `enable-${vendor.vendor}`,
-			label: vendor.displayName,
-			run: async () => {
-				await this.enableProvider(vendor.vendor);
-			}
-		}));
+		this.dropdownActions = [
+			// Always add "Add Custom Model" option
+			toAction({
+				id: 'ai.model.add',
+				label: localize('ai.model.add.custom', 'Add Custom Model...'),
+				run: async () => {
+					await this.commandService.executeCommand('ai.model.add');
+					await this.viewModel.resolve();
+					this.refreshTable();
+				}
+			}),
+			...(vendorsWithoutModels.length > 0 ? [new Separator()] : []),
+			...vendorsWithoutModels.map(vendor => toAction({
+				id: `enable-${vendor.vendor}`,
+				label: vendor.displayName,
+				run: async () => {
+					await this.enableProvider(vendor.vendor);
+				}
+			}))
+		];
 	}
 
 	private async enableProvider(vendorId: string): Promise<void> {

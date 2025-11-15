@@ -4,10 +4,9 @@
  *--------------------------------------------------------------------------------------------*/
 
 import assert from 'assert';
-import { suite, test } from 'mocha';
-import { URI } from '../../../base/common/uri.js';
-import { AdaptivePromptBuilder } from './adaptivePromptBuilder.js';
-import { EditorContext } from './aiTypes.js';
+// import { URI } from '../../../base/common/uri.js';
+// import { AdaptivePromptBuilder } from './adaptivePromptBuilder.js';
+// import { EditorContext } from './aiTypes.js';
 
 suite('AdaptivePromptBuilder', () => {
 	test('buildPrompt includes project rules', async () => {
@@ -31,26 +30,26 @@ suite('AdaptivePromptBuilder', () => {
 	});
 
 	test('extractSymbolName finds function names', () => {
-		const content = 'function myFunction() {}';
-		const selection = { startLineNumber: 1, startColumn: 1, endLineNumber: 1, endColumn: 30 };
+		// const content = 'function myFunction() {}';
+		// const selection = { startLineNumber: 1, startColumn: 1, endLineNumber: 1, endColumn: 30 };
 		// Should extract "myFunction"
 		assert.ok(true, 'Symbol extraction test placeholder');
 	});
 
 	test('buildSystemPrompt includes file context', () => {
-		const editorContext: EditorContext = {
-			uri: URI.file('/project/src/file.ts'),
-			languageId: 'typescript',
-			version: 1,
-		};
+		// const editorContext: EditorContext = {
+		// 	uri: URI.file('/project/src/file.ts'),
+		// 	languageId: 'typescript',
+		// 	version: 1,
+		// };
 		// Should include file name and language
 		assert.ok(true, 'System prompt test placeholder');
 	});
 
 	test('buildUserPrompt includes context files', () => {
-		const contextFiles = [
-			{ uri: URI.file('/project/src/file1.ts'), content: 'export const x = 1;', reason: 'Related' }
-		];
+		// const contextFiles = [
+		// 	{ uri: URI.file('/project/src/file1.ts'), content: 'export const x = 1;', reason: 'Related' }
+		// ];
 		// Should include file content in prompt
 		assert.ok(true, 'User prompt context test placeholder');
 	});

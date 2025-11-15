@@ -215,6 +215,9 @@ const _allApiProposals = {
 	embeddings: {
 		proposal: 'https://raw.githubusercontent.com/microsoft/vscode/main/src/vscode-dts/vscode.proposed.embeddings.d.ts',
 	},
+	extensionBridge: {
+		proposal: 'https://raw.githubusercontent.com/microsoft/vscode/main/src/vscode-dts/vscode.proposed.extensionBridge.d.ts',
+	},
 	extensionRuntime: {
 		proposal: 'https://raw.githubusercontent.com/microsoft/vscode/main/src/vscode-dts/vscode.proposed.extensionRuntime.d.ts',
 	},

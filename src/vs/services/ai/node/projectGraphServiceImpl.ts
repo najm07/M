@@ -11,10 +11,14 @@ import { joinPath } from '../../../base/common/resources.js';
 import { IFileService } from '../../../platform/files/common/files.js';
 import { ILogService } from '../../../platform/log/common/log.js';
 import { IEnvironmentService } from '../../../platform/environment/common/environment.js';
-import { IProjectGraphService, ProjectGraph, ProjectNode, ImportReference } from '../common/projectGraphService.js';
+import { IProjectGraphService, ProjectGraph, ProjectNode } from '../common/projectGraphService.js';
 import { IModelService } from '../../../editor/common/services/model.js';
+import { ILanguageFeaturesService } from '../../../editor/common/services/languageFeatures.js';
+import { ITreeSitterLibraryService } from '../../../editor/common/services/treeSitter/treeSitterLibraryService.js';
+import { ILanguageService } from '../../../editor/common/languages/language.js';
+import { LanguageAwareParser } from './languageAwareParser.js';
 import { VSBuffer } from '../../../base/common/buffer.js';
-const PROJECT_GRAPH_VERSION = 1;
+const PROJECT_GRAPH_VERSION = 2; // Incremented for multi-language support
 
 interface GraphData {
 	version: number;
@@ -33,15 +37,27 @@ export class ProjectGraphService extends Disposable implements IProjectGraphServ
 	private readonly _onDidUpdateGraph = new Emitter<URI>();
 	public readonly onDidUpdateGraph: Event<URI> = this._onDidUpdateGraph.event;
 
+	private readonly parser: LanguageAwareParser;
+
 	constructor(
 		@IFileService private readonly fileService: IFileService,
 		@IEnvironmentService private readonly environmentService: IEnvironmentService,
 		@ILogService private readonly logService: ILogService,
 		@IModelService private readonly modelService: IModelService,
+		@ILanguageFeaturesService private readonly languageFeaturesService: ILanguageFeaturesService,
+		@ITreeSitterLibraryService private readonly treeSitterService: ITreeSitterLibraryService | undefined,
+		@ILanguageService private readonly languageService: ILanguageService,
 	) {
 		super();
 
 		this._graphPath = joinPath(this.environmentService.userRoamingDataHome, '.vscode', 'context', 'graph.json');
+		this.parser = new LanguageAwareParser(
+			this.modelService,
+			this.languageFeaturesService,
+			this.treeSitterService,
+			this.logService,
+			this.languageService
+		);
 	}
 
 	override dispose(): void {
@@ -275,7 +291,7 @@ export class ProjectGraphService extends Disposable implements IProjectGraphServ
 				}
 			} else if (this.shouldProcessFile(child.resource)) {
 				try {
-					const node = await this.processFile(child.resource, workspaceRoot);
+					const node = await this.processFile(child.resource, workspaceRoot, token);
 					if (node) {
 						nodes.set(node.uri.toString(), node);
 
@@ -308,69 +324,25 @@ export class ProjectGraphService extends Disposable implements IProjectGraphServ
 		}
 	}
 
-	private async processFile(uri: URI, workspaceRoot: URI): Promise<ProjectNode | undefined> {
-		const model = this.modelService.getModel(uri);
-		if (!model) {
-			// Try to read file
-			try {
-				const content = await this.fileService.readFile(uri);
-				// For now, we'll use a simple parser
-				// In production, this should use language services
-				return this.parseFileSimple(uri, content.value.toString(), workspaceRoot);
-			} catch (error) {
-				return undefined;
+	private async processFile(uri: URI, workspaceRoot: URI, token?: CancellationToken): Promise<ProjectNode | undefined> {
+		try {
+			// Try to read file content
+			let content: string;
+			const model = this.modelService.getModel(uri);
+			if (model) {
+				content = model.getValue();
+			} else {
+				const fileContent = await this.fileService.readFile(uri);
+				content = fileContent.value.toString();
 			}
+
+			// Use language-aware parser
+			const result = await this.parser.parseFile(uri, content, workspaceRoot, token);
+			return result?.node;
+		} catch (error) {
+			this.logService.debug(`[ProjectGraphService] Failed to process file ${uri.toString()}`, error);
+			return undefined;
 		}
-
-		return this.parseFileWithLanguageService(uri, model.getValue(), workspaceRoot);
-	}
-
-	private parseFileSimple(uri: URI, content: string, workspaceRoot: URI): ProjectNode {
-		const imports: ImportReference[] = [];
-		const exports: string[] = [];
-
-		// Simple regex-based parsing (can be enhanced with language services)
-		const importRegex = /import\s+(?:(?:\*\s+as\s+\w+)|(?:\{[^}]*\})|(?:\w+))\s+from\s+['"]([^'"]+)['"]/g;
-		const exportRegex = /export\s+(?:default\s+)?(?:function|class|const|let|var|interface|type)\s+(\w+)/g;
-
-		let match;
-		while ((match = importRegex.exec(content)) !== null) {
-			const importPath = match[1];
-			const resolvedUri = this.resolveImport(uri, importPath, workspaceRoot);
-			if (resolvedUri) {
-				imports.push({ from: resolvedUri });
-			}
-		}
-
-		while ((match = exportRegex.exec(content)) !== null) {
-			exports.push(match[1]);
-		}
-
-		return {
-			uri,
-			name: uri.path.split('/').pop() || uri.toString(),
-			type: 'file',
-			imports,
-			exports,
-		};
-	}
-
-	private parseFileWithLanguageService(uri: URI, content: string, workspaceRoot: URI): ProjectNode {
-		// Use language service if available
-		// For now, fall back to simple parsing
-		return this.parseFileSimple(uri, content, workspaceRoot);
-	}
-
-	private resolveImport(from: URI, importPath: string, workspaceRoot: URI): URI | undefined {
-		// Simple resolution - can be enhanced
-		if (importPath.startsWith('.')) {
-			const baseDir = joinPath(from, '..');
-			return joinPath(baseDir, importPath.replace(/\.(ts|js|tsx|jsx)$/, ''));
-		}
-
-		// Handle node_modules imports
-		// This is simplified - real implementation would need module resolution
-		return undefined;
 	}
 
 	private shouldProcessFile(uri: URI): boolean {
@@ -382,13 +354,29 @@ export class ProjectGraphService extends Disposable implements IProjectGraphServ
 			'dist',
 			'build',
 			'.vscode',
+			'__pycache__',
+			'.pytest_cache',
+			'target',
+			'bin',
+			'obj',
 		];
 
 		if (excludePatterns.some(pattern => path.includes(pattern))) {
 			return false;
 		}
 
-		const codeExtensions = ['.ts', '.tsx', '.js', '.jsx'];
+		// Support multiple languages
+		const codeExtensions = [
+			'.ts', '.tsx', '.js', '.jsx', // TypeScript/JavaScript
+			'.py', // Python
+			'.java', // Java
+			'.cpp', '.cc', '.cxx', '.c++', '.c', '.h', '.hpp', // C/C++
+			'.cs', // C#
+			'.go', // Go
+			'.rs', // Rust
+			'.rb', // Ruby
+			'.php', // PHP
+		];
 		return codeExtensions.some(ext => path.endsWith(ext));
 	}
 

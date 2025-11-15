@@ -4,10 +4,9 @@
  *--------------------------------------------------------------------------------------------*/
 
 import assert from 'assert';
-import { suite, test } from 'mocha';
-import { URI } from '../../../base/common/uri.js';
-import { AgentService } from './agentServiceImpl.js';
-import { AgentStepType, AgentTaskStatus } from '../common/agentService.js';
+// import { URI } from '../../../base/common/uri.js';
+// import { AgentService } from './agentServiceImpl.js';
+// import { AgentStepType, AgentTaskStatus } from '../common/agentService.js';
 
 suite('AgentService Implementation', () => {
 	test('planTask generates valid plan structure', async () => {

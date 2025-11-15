@@ -4,10 +4,9 @@
  *--------------------------------------------------------------------------------------------*/
 
 import assert from 'assert';
-import { suite, test } from 'mocha';
-import { URI } from '../../../base/common/uri.js';
-import { CancellationToken } from '../../../base/common/cancellation.js';
-import { AITestUtils } from './aiTestUtils.js';
+// import { URI } from '../../../base/common/uri.js';
+// import { CancellationToken } from '../../../base/common/cancellation.js';
+// import { AITestUtils } from './aiTestUtils.js';
 
 /**
  * Comprehensive integration tests

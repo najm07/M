@@ -4,8 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import assert from 'assert';
-import { suite, test } from 'mocha';
-import { URI } from '../../../base/common/uri.js';
+// import { URI } from '../../../base/common/uri.js';
 
 /**
  * Smoke tests - basic end-to-end functionality checks

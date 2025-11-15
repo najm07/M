@@ -17,17 +17,24 @@ This document describes the native AI enhancements integrated into VS Code, desi
 
 This implementation adds native AI capabilities directly into VS Code, eliminating the need for extensions. The system provides:
 
-- **Multi-Model Support**: Use OpenAI, Anthropic, or local models
-- **Context-Aware Intelligence**: Understands your entire codebase
+- **Multi-Model Support**: Use OpenAI, Anthropic, or local models (Ollama)
+- **Context-Aware Intelligence**: Understands your entire codebase with SQLite vector store
 - **Inline Commands**: Execute AI actions directly in code
-- **Agent Automation**: Multi-step task execution
+- **Agent Automation**: Multi-step task execution with secure sandbox
 - **Project Graph Reasoning**: Hierarchical code understanding
+- **Extension Bridge SDK**: Extend AI capabilities through extensions
+- **Diff Review UI**: Review AI changes before applying them
+- **Terminal AI Commands**: Use `@workspace` and `@git` commands in terminal
 
 ## Quick Start
 
 ### 1. Configure AI Models
 
-Create `~/.void/config.json`:
+The configuration file is automatically created at `~/.void/config.json` when you first use AI features. You can manage models through the UI (see section 2 below) or edit the file directly.
+
+**Manual Configuration** (if you prefer editing JSON directly):
+
+Create or edit `~/.void/config.json`:
 
 ```json
 {
@@ -51,9 +58,33 @@ Create `~/.void/config.json`:
 }
 ```
 
-### 2. Switch Models
+### 2. Using the UI to Manage Models
 
-Press `Ctrl+Shift+M` (or `Cmd+Shift+M` on Mac) to open the model picker and switch between configured models.
+You can manage AI models through a graphical interface:
+
+**Add a New Model:**
+- Press `Ctrl+Shift+P` (or `Cmd+Shift+P` on Mac) → Type "AI: Add AI Model"
+- Follow the step-by-step wizard:
+  1. Enter a unique model ID (e.g., `ollama-llama3`)
+  2. Enter the API URL (e.g., `http://localhost:11434` for Ollama or `https://api.openai.com/v1` for OpenAI)
+  3. Select the model family (Ollama, OpenAI, Anthropic, or Custom)
+  4. Enter API key if needed (for cloud APIs)
+  5. Choose whether to set as default model
+
+**Manage Models:**
+- Press `Ctrl+Shift+P` → Type "AI: Manage AI Models"
+- View all configured models
+- Switch between models
+- Set default model
+- Delete models
+
+**Open Config File:**
+- Press `Ctrl+Shift+P` → Type "AI: Open AI Configuration File"
+- Edit the JSON file directly if you prefer
+
+**Switch Models Quickly:**
+- Press `Ctrl+Alt+M` (or `Cmd+Alt+M` on Mac) to open the model picker
+- Or use Command Palette → "AI: Switch AI Model"
 
 ### 3. Start Using AI Commands
 
@@ -151,26 +182,47 @@ The context service provides semantic search across your codebase:
 
 ### 5. Project Graph Reasoning
 
-The system builds a hierarchical graph of your project:
+The system builds a hierarchical graph of your project with enhanced multi-language support:
 
 **What it tracks:**
 - Import/export relationships
 - Function call chains
 - File dependencies
 - Symbol references
+- Class and function definitions
+
+**Supported Languages:**
+- TypeScript/JavaScript (with language service integration)
+- Python (with tree-sitter WASM)
+- Java, C/C++, C#, Go, Rust, Ruby, PHP (with tree-sitter WASM)
+- Falls back to regex parsing for unsupported languages
 
 **Location:** `.vscode/context/graph.json`
 
 **Benefits:**
-- AI understands code relationships
+- AI understands code relationships across multiple languages
 - Better context for refactoring
 - Smarter code suggestions
 - Dependency-aware changes
+- Fast WASM-based parsing for performance-critical indexing
+
+**Visual Graph Viewer:**
+- Press `Ctrl+Shift+G` (or `Cmd+Shift+G` on Mac) to open the visual project graph
+- Interactive D3.js visualization of your codebase structure
+- Click nodes to open files
+- Drag nodes to rearrange the graph
+- Refresh button to rebuild the graph
 
 **Rebuild Graph:**
 ```typescript
 // Via command palette: "AI: Rebuild Project Graph"
+// Or use the refresh button in the visual graph viewer
 ```
+
+**Performance:**
+- Uses WASM-based analyzers for fast parsing
+- Parallel processing for large codebases
+- Language service integration for TypeScript/JavaScript for best accuracy
 
 ### 6. Adaptive Prompt Assembly
 
@@ -193,7 +245,7 @@ When you ask to refactor a function, the system:
 
 ### 7. Agent-Based Automation
 
-Execute complex multi-step tasks:
+Execute complex multi-step tasks with secure sandbox execution:
 
 **Basic Usage:**
 1. Press `Ctrl+Shift+P` and run "AI: Execute Agent Task"
@@ -202,15 +254,24 @@ Execute complex multi-step tasks:
    - Search for related files
    - Generate refactored code
    - Apply changes
-   - Run tests
+   - Run tests (in secure sandbox)
    - Verify changes
 
 **Agent Steps:**
 - **Search**: Find relevant files or code
 - **Generate**: Create new code
 - **Edit**: Modify existing code
-- **Test**: Run tests
-- **Verify**: Check if changes work
+- **Test**: Run tests in isolated sandbox
+- **Verify**: Validate changes before applying
+
+**Secure Sandbox:**
+All agent-executed code runs in an isolated sandbox with:
+- **Isolation**: Code runs in temporary directories
+- **Safety Checks**: Validates for dangerous patterns (eval, process.exit, etc.)
+- **Timeouts**: Automatic termination of long-running operations
+- **Resource Limits**: Memory and execution time constraints
+- **Command Whitelist**: Only approved commands can execute
+- **Automatic Cleanup**: Sandbox directories cleaned after execution
 
 **Monitor Tasks:**
 - View active tasks: "AI: View Active Agent Tasks"
@@ -221,6 +282,77 @@ Execute complex multi-step tasks:
 - "Convert all callbacks to async/await"
 - "Generate unit tests for authentication module"
 - "Refactor duplicate code into shared utilities"
+
+### 8. Diff Review UI
+
+Review AI-generated changes before applying them:
+
+**How it works:**
+1. When AI generates code changes, a diff review is automatically created
+2. A diff editor opens showing original vs modified code
+3. Review changes side-by-side
+4. Accept, reject, or partially accept changes
+
+**Commands:**
+- `AI: Accept AI Changes` - Accept all changes from a review
+- `AI: Reject AI Changes` - Reject and discard changes
+- `AI: Show Pending AI Reviews` - View all pending reviews
+
+**Usage:**
+```typescript
+// After AI generates changes, a diff review opens automatically
+// Review the changes in the diff editor
+// Click "Accept" or "Reject" buttons, or use commands
+```
+
+**Partial Acceptance:**
+You can accept only specific hunks from a diff review. The system tracks which parts were accepted.
+
+### 9. Terminal AI Commands
+
+Use AI-powered commands directly in the terminal:
+
+**@workspace Command:**
+Query your workspace with natural language:
+```bash
+@workspace How does authentication work in this project?
+@workspace Where is the user model defined?
+@workspace Show me error handling patterns
+```
+
+**@git Command:**
+Get AI assistance with git operations:
+```bash
+@git status
+@git commit message for these changes
+@git how to undo last commit
+@git create branch for feature
+```
+
+**How it works:**
+1. Type `@workspace` or `@git` followed by your question/command
+2. The system intercepts the command
+3. AI processes it with workspace/git context
+4. Results are displayed in the terminal
+
+**Features:**
+- **@workspace**: Uses semantic search to find relevant code
+- **@git**: Analyzes git status and history for context-aware suggestions
+- **Safety**: Dangerous git commands are flagged with warnings
+- **Automatic**: Commands are intercepted and processed automatically
+
+**Examples:**
+```bash
+# Workspace queries
+@workspace find all API endpoints
+@workspace explain the authentication flow
+@workspace where are database models defined
+
+# Git assistance
+@git what changed in the last 3 commits?
+@git how to merge feature branch safely
+@git create commit message for staged changes
+```
 
 ## Configuration
 
@@ -270,9 +402,17 @@ Rules are automatically included in all AI prompts.
 
 ### Context Index Location
 
-The context index is stored at:
-- **File-based**: `.vscode/context/index.json` (workspace)
-- **Fallback**: VS Code storage (if file write fails)
+The context index uses a high-performance SQLite vector store:
+- **Primary**: `.vscode/context/context-{workspaceId}.db` (SQLite database)
+- **Fallback**: `.vscode/context/index.json` (JSON format)
+- **Automatic**: Falls back to JSON if SQLite is unavailable
+
+**Benefits of SQLite Vector Store:**
+- Faster semantic search with optimized vector similarity
+- Efficient storage of embeddings as BLOBs
+- Full-text search fallback using FTS5
+- Better performance on large codebases
+- Automatic workspace isolation
 
 ### Project Graph Location
 
@@ -316,6 +456,86 @@ The project graph is stored at:
    - Review and approve changes
 
 ## Advanced Features
+
+### Extension Bridge SDK
+
+Extend AI capabilities through VS Code extensions using the Extension Bridge API:
+
+**Register a Context Provider:**
+```typescript
+import * as vscode from 'vscode';
+
+export function activate(context: vscode.ExtensionContext) {
+  // Register a context provider
+  const provider = vscode.ai.registerContextProvider({
+    provideContext(query, token) {
+      // Return custom context items
+      return [
+        {
+          id: 'custom-item-1',
+          type: 'file',
+          uri: vscode.Uri.file('/path/to/file.ts'),
+          content: 'Custom context content',
+          metadata: { source: 'my-extension' }
+        }
+      ];
+    },
+    getContext(uri, symbol, token) {
+      // Return context for specific file/symbol
+      return {
+        id: `${uri.toString()}#${symbol}`,
+        type: 'symbol',
+        uri,
+        metadata: { custom: 'data' }
+      };
+    },
+    getRelated(itemId, relationshipTypes, token) {
+      // Return related items
+      return [];
+    }
+  });
+
+  context.subscriptions.push(provider);
+}
+```
+
+**Query Context:**
+```typescript
+// Query the AI context system
+const results = await vscode.ai.queryContext({
+  query: 'authentication middleware',
+  maxResults: 10,
+  filters: {
+    languageIds: ['typescript'],
+    filePatterns: ['**/*.ts']
+  }
+});
+
+// Get context for a specific file
+const context = await vscode.ai.getContext(
+  vscode.Uri.file('/path/to/file.ts'),
+  'functionName'
+);
+
+// Get related context
+const related = await vscode.ai.getRelatedContext('item-id', [
+  'imports', 'calls', 'references'
+]);
+
+// Contribute your own context
+vscode.ai.contributeContext({
+  id: 'my-context-item',
+  type: 'metadata',
+  content: 'Custom context data',
+  metadata: { extension: 'my-extension' }
+});
+```
+
+**Use Cases:**
+- Add domain-specific context (database schemas, API docs)
+- Integrate external tools (Jira, Confluence, documentation)
+- Provide framework-specific insights
+- Share context across workspace extensions
 
 ### Custom Agent Steps
 
@@ -389,6 +609,8 @@ const prompt = await builder.buildPrompt(editorContext, userPrompt, {
 1. Manually rebuild: "AI: Rebuild Context Index"
 2. Check file permissions for `.vscode/context/`
 3. Verify embedding service is enabled
+4. Check SQLite database is accessible (if using vector store)
+5. Review logs for SQLite errors: View → Output → "AI Service"
 
 ### Agent Tasks Failing
 
@@ -399,6 +621,9 @@ const prompt = await builder.buildPrompt(editorContext, userPrompt, {
 2. Verify workspace has required files
 3. Check step descriptions are clear
 4. Review logs: View → Output → "AI Agent"
+5. **Sandbox Issues**: Check if test commands are whitelisted
+6. **Timeout**: Increase timeout in sandbox options if tests take longer
+7. **Validation Errors**: Review sandbox validation errors for dangerous patterns
 
 ### Project Graph Empty
 
@@ -419,6 +644,9 @@ const prompt = await builder.buildPrompt(editorContext, userPrompt, {
 2. Limit context file count in prompts
 3. Use smaller embedding models for local indexing
 4. Disable auto-indexing for very large workspaces
+5. **SQLite Vector Store**: Automatically provides better performance than JSON storage
+6. **Vector Store**: Check if SQLite database is being used (check logs)
+7. **Large Workspaces**: Consider rebuilding index periodically
 
 ## Architecture
 
@@ -428,6 +656,9 @@ const prompt = await builder.buildPrompt(editorContext, userPrompt, {
 - **IContextService**: Semantic search and file indexing
 - **IProjectGraphService**: Code relationship tracking
 - **IAgentService**: Multi-step task execution
+- **IAIDiffReviewService**: Diff review and change management
+- **ITerminalCommandService**: Terminal command interception and processing
+- **IExtensionBridgeService**: Extension API for context sharing
 
 ### Integration Points
 
@@ -438,9 +669,11 @@ const prompt = await builder.buildPrompt(editorContext, userPrompt, {
 ### Data Storage
 
 - **Model Config**: `~/.void/config.json`
-- **Context Index**: `.vscode/context/index.json`
+- **Context Index**: `.vscode/context/context-{workspaceId}.db` (SQLite) or `.vscode/context/index.json` (fallback)
 - **Project Graph**: `.vscode/context/graph.json`
 - **Project Rules**: `.vscode/ai/rules.md`
+- **Sandbox**: `.vscode/sandbox/` (temporary, auto-cleaned)
+- **Diff Reviews**: `.vscode/ai-diff-reviews/` (temporary, auto-cleaned)
 
 ## Examples
 
@@ -483,6 +716,34 @@ function processOrder(order: Order) {
 6. Verify no errors
 
 **Result:** All files converted with proper types.
+
+### Example 4: Diff Review
+
+**Scenario:** AI suggests refactoring a function
+
+**Process:**
+1. AI generates changes
+2. Diff review opens automatically
+3. Review changes side-by-side
+4. Accept or reject changes
+
+**Result:** Changes applied only after review and approval.
+
+### Example 5: Terminal Commands
+
+**@workspace Query:**
+```bash
+@workspace How does the authentication middleware work?
+```
+
+**Result:** AI searches codebase and explains authentication flow with code references.
+
+**@git Command:**
+```bash
+@git create commit message for staged changes
+```
+
+**Result:** AI analyzes changes and suggests a commit message.
 
 ## Best Practices
 
@@ -532,14 +793,72 @@ npm run test:smoke -- --area ai
 
 See [TESTING.md](./TESTING.md) for detailed testing documentation.
 
+## Local AI Support (Ollama)
+
+VS Code Apex includes native support for local AI models via Ollama, enabling offline AI assistance and privacy-first development.
+
+### Setting Up Ollama
+
+1. **Install Ollama**: Download from [ollama.ai](https://ollama.ai)
+
+2. **Pull a Model**:
+   ```bash
+   ollama pull llama3.1
+   ollama pull codellama
+   ```
+
+3. **Configure in VS Code**:
+   Edit `~/.void/config.json`:
+   ```json
+   {
+     "models": {
+       "llama3.1": {
+         "api": "http://localhost:11434",
+         "family": "ollama",
+         "default": true
+       },
+       "codellama": {
+         "api": "http://localhost:11434",
+         "family": "ollama"
+       },
+       "gpt-4": {
+         "api": "https://api.openai.com/v1",
+         "key": "sk-your-key",
+         "family": "openai"
+       }
+     }
+   }
+   ```
+
+### Hybrid Routing (Local → Cloud Fallback)
+
+The system automatically:
+- **Tries local Ollama first** for faster, private responses
+- **Falls back to cloud** if Ollama is unavailable or fails
+- **Seamlessly switches** between local and cloud models
+
+This provides:
+- **Privacy**: Code never leaves your machine when using local models
+- **Speed**: Lower latency for local requests
+- **Reliability**: Automatic fallback ensures you're never blocked
+- **Cost**: Free local inference vs paid cloud APIs
+
+### Health Checks
+
+The system automatically checks Ollama availability before each request. If Ollama is down or unreachable, it gracefully falls back to configured cloud models.
+
 ## Future Enhancements
 
-- [ ] Diff mode UI for reviewing AI changes
-- [ ] Terminal integration for @workspace, @git commands
-- [ ] Enhanced language service integration
-- [ ] SQLite-based vector store for better performance
-- [ ] Multi-language project graph support
-- [ ] Visual project graph viewer
+- [x] Local Ollama integration with hybrid routing
+- [x] SQLite-based vector store for better performance
+- [x] Secure sandbox for agent execution
+- [x] Extension Bridge SDK for context sharing
+- [x] Diff mode UI for reviewing AI changes
+- [x] Terminal integration for @workspace, @git commands
+- [x] Enhanced language service integration
+- [x] Multi-language project graph support
+- [x] Visual project graph viewer
+- [x] WASM-based analyzers for performance-critical indexing
 
 ## Support
 

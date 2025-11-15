@@ -4,8 +4,8 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { URI } from '../../../base/common/uri.js';
-import { VSBuffer } from '../../../base/common/buffer.js';
-import { IFileService } from '../../../../platform/files/common/files.js';
+// import { VSBuffer } from '../../../base/common/buffer.js';
+// import { IFileService } from '../../../platform/files/common/files.js';
 import { AIModelConfiguration } from '../common/aiTypes.js';
 
 /**

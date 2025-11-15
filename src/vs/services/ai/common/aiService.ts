@@ -5,8 +5,12 @@
 
 import { CancellationToken } from '../../../base/common/cancellation.js';
 import { Event } from '../../../base/common/event.js';
+import { URI } from '../../../base/common/uri.js';
 import { createDecorator } from '../../../platform/instantiation/common/instantiation.js';
 import { AIDiff, AICompletionResponse, AIModelConfiguration, AIStreamHandle, EditorContext } from './aiTypes.js';
+
+// Re-export for convenience
+export type { AICompletionResponse } from './aiTypes.js';
 
 export const IAIService = createDecorator<IAIService>('aiService');
 
@@ -39,6 +43,12 @@ export interface IAIService {
 	getActiveModel(): string | undefined;
 	setActiveModel(modelId: string): Promise<void>;
 	reloadModelConfiguration(): Promise<void>;
+
+	// Model management
+	getConfigUri(): URI;
+	addModel(model: Omit<AIModelConfiguration, 'api'> & { api: string }): Promise<void>;
+	removeModel(modelId: string): Promise<void>;
+	updateModel(modelId: string, updates: Partial<Omit<AIModelConfiguration, 'id' | 'api'> & { api?: string }>): Promise<void>;
 }
 
 

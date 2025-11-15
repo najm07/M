@@ -12,34 +12,70 @@ The test suite is organized into three categories:
 
 ## Running Tests
 
-### Unit Tests
+**Note**: Tests must be compiled first. Run `npm run compile` before running tests.
+
+### Unit Tests (Node.js)
 
 ```bash
-# Run all unit tests
-npm test -- --grep "Unit"
+# Run all node unit tests
+npm run test-node
 
-# Run specific test suite
-npm test -- src/vs/services/ai/common/aiService.test.ts
+# Run a specific test file (use node directly, not npm run)
+node test/unit/node/index.js --run src/vs/services/ai/common/integration.test.ts
+
+# Run tests matching a pattern
+node test/unit/node/index.js --runGlob "**/ai/**/*.test.js"
 ```
 
-### Integration Tests
+### Unit Tests (Electron - Recommended)
+
+**Note**: Test files should use global `suite` and `test` functions (provided by mocha), not import them:
+```typescript
+import assert from 'assert';
+// Do NOT import: import { suite, test } from 'mocha';
+// suite and test are available as globals
+
+suite('My Test Suite', () => {
+    test('my test', () => {
+        assert.ok(true);
+    });
+});
+```
 
 ```bash
-# Run integration tests
-npm test -- --grep "Integration"
+# Windows
+.\scripts\test.bat
 
-# Run specific integration test
-npm test -- src/vs/services/ai/common/integration.test.ts
+# Linux/Mac
+./scripts/test.sh
+
+# Run specific test file
+.\scripts\test.bat --run src/vs/services/ai/common/integration.test.ts
+
+# Run tests matching a pattern
+.\scripts\test.bat --glob "**/ai/**/*.test.js"
+```
+
+### Unit Tests (Browser)
+
+```bash
+# Run browser tests
+npm run test-browser
+
+# Run specific browser
+npm run test-browser -- --browser chromium
+
+# Run specific test file
+npm run test-browser -- --run src/vs/services/ai/common/aiService.test.ts
 ```
 
 ### Smoke Tests
 
 ```bash
 # Run smoke tests (requires VS Code automation)
-npm run test:smoke
+npm run smoketest
 
-# Run specific smoke test area
-npm run test:smoke -- --area ai
+# Note: Smoke tests are in test/smoke/src/areas/ai/ai.test.ts
 ```
 
 ## Test Files

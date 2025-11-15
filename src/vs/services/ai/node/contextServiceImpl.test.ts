@@ -4,9 +4,8 @@
  *--------------------------------------------------------------------------------------------*/
 
 import assert from 'assert';
-import { suite, test } from 'mocha';
-import { URI } from '../../../base/common/uri.js';
-import { ContextService } from './contextServiceImpl.js';
+// import { URI } from '../../../base/common/uri.js';
+// import { ContextService } from './contextServiceImpl.js';
 
 suite('ContextService Implementation', () => {
 	test('indexFile stores content correctly', async () => {
@@ -21,20 +20,20 @@ suite('ContextService Implementation', () => {
 
 	test('cosineSimilarity calculates correctly', () => {
 		// Test vector similarity calculation
-		const vecA = [1, 0, 0];
-		const vecB = [1, 0, 0];
+		// const vecA = [1, 0, 0];
+		// const vecB = [1, 0, 0];
 		// Should return 1.0 for identical vectors
 		assert.ok(true, 'Cosine similarity test placeholder');
 	});
 
 	test('shouldIndexFile excludes node_modules', () => {
-		const nodeModulesUri = URI.file('/project/node_modules/package/index.js');
+		// const nodeModulesUri = URI.file('/project/node_modules/package/index.js');
 		// Should return false
 		assert.ok(true, 'Exclude node_modules test placeholder');
 	});
 
 	test('shouldIndexFile includes TypeScript files', () => {
-		const tsFile = URI.file('/project/src/file.ts');
+		// const tsFile = URI.file('/project/src/file.ts');
 		// Should return true
 		assert.ok(true, 'Include TS files test placeholder');
 	});

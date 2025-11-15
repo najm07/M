@@ -4,8 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import assert from 'assert';
-import { suite, test } from 'mocha';
-import { URI } from '../../../../../base/common/uri.js';
+// import { URI } from '../../../../base/common/uri.js';
 
 suite('AIContextContribution', () => {
 	test('schedules index on file save', async () => {
@@ -35,7 +34,7 @@ suite('AIContextContribution', () => {
 
 	test('shouldIndex filters excluded patterns', () => {
 		// Test file filtering logic
-		const nodeModules = URI.file('/project/node_modules/package/index.js');
+		// const nodeModules = URI.file('/project/node_modules/package/index.js');
 		// Should return false
 		assert.ok(true, 'File filtering test placeholder');
 	});

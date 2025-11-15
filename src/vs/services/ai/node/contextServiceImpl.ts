@@ -16,6 +16,8 @@ import { IContextService, ContextSearchResult, ContextIndexEntry } from '../comm
 import { IAiEmbeddingVectorService } from '../../../workbench/services/aiEmbeddingVector/common/aiEmbeddingVectorService.js';
 import { VSBuffer } from '../../../base/common/buffer.js';
 import { RunOnceScheduler } from '../../../base/common/async.js';
+import { VectorStore } from './vectorStore.js';
+import { IWorkspaceContextService } from '../../../platform/workspace/common/workspace.js';
 
 const CONTEXT_INDEX_STORAGE_KEY = 'workbench.ai.contextIndex';
 const CONTEXT_INDEX_VERSION = 1;
@@ -31,6 +33,8 @@ export class ContextService extends Disposable implements IContextService {
 	private readonly _index: Map<string, ContextIndexEntry> = new Map();
 	private readonly _indexPath: URI;
 	private readonly _indexSaveScheduler: RunOnceScheduler;
+	private readonly _vectorStore: VectorStore | undefined;
+	private _useVectorStore = false;
 
 	private readonly _onDidIndexFile = new Emitter<URI>();
 	private readonly _onDidRemoveFile = new Emitter<URI>();
@@ -44,10 +48,28 @@ export class ContextService extends Disposable implements IContextService {
 		@IStorageService private readonly storageService: IStorageService,
 		@ILogService private readonly logService: ILogService,
 		@IAiEmbeddingVectorService private readonly embeddingService: IAiEmbeddingVectorService,
+		@IWorkspaceContextService private readonly workspaceContextService: IWorkspaceContextService,
 	) {
 		super();
 
-		// Store index in workspace storage for now (can be upgraded to file-based SQLite later)
+		// Try to initialize SQLite vector store
+		try {
+			const workspace = this.workspaceContextService.getWorkspace();
+			const workspaceId = workspace.id || 'default';
+			this._vectorStore = new VectorStore(`context-${workspaceId}`, this.fileService, this.environmentService, this.logService);
+			void this._vectorStore.initialize().then(() => {
+				this._useVectorStore = true;
+				this.logService.info('[ContextService] Using SQLite vector store');
+			}).catch((error) => {
+				this.logService.warn('[ContextService] Failed to initialize vector store, falling back to JSON', error);
+				this._useVectorStore = false;
+			});
+		} catch (error) {
+			this.logService.warn('[ContextService] Vector store not available, using JSON storage', error);
+			this._useVectorStore = false;
+		}
+
+		// Fallback: Store index in workspace storage
 		this._indexPath = joinPath(this.environmentService.userRoamingDataHome, '.vscode', 'context', 'index.json');
 
 		this._indexSaveScheduler = this._register(new RunOnceScheduler(() => {
@@ -60,14 +82,41 @@ export class ContextService extends Disposable implements IContextService {
 	override dispose(): void {
 		// Save index before disposing
 		this._indexSaveScheduler.schedule();
+		if (this._vectorStore) {
+			void this._vectorStore.close();
+		}
 		this._onDidIndexFile.dispose();
 		this._onDidRemoveFile.dispose();
 		super.dispose();
 	}
 
 	async search(query: string, maxResults: number = 10, token?: CancellationToken): Promise<ContextSearchResult[]> {
+		// Use vector store if available and embeddings are enabled
+		if (this._useVectorStore && this._vectorStore && this.embeddingService.isEnabled()) {
+			try {
+				const queryEmbedding = await this.embeddingService.getEmbeddingVector(query, token || CancellationToken.None);
+				const results = await this._vectorStore.search(queryEmbedding, maxResults, 0.3);
+				return results.map(r => ({
+					uri: r.uri,
+					score: r.score,
+					snippet: r.snippet,
+					metadata: r.metadata,
+				}));
+			} catch (error) {
+				this.logService.warn('[ContextService] Vector store search failed, falling back', error);
+			}
+		}
+
+		// Fallback to in-memory search
 		if (!this.embeddingService.isEnabled()) {
 			this.logService.warn('[ContextService] Embedding service not enabled, falling back to text search');
+			if (this._useVectorStore && this._vectorStore) {
+				try {
+					return await this._vectorStore.textSearch(query, maxResults);
+				} catch (error) {
+					this.logService.warn('[ContextService] Vector store text search failed', error);
+				}
+			}
 			return this.textSearch(query, maxResults);
 		}
 
@@ -194,6 +243,22 @@ export class ContextService extends Disposable implements IContextService {
 			lastModified: now,
 		};
 
+		// Store in vector store if available
+		if (this._useVectorStore && this._vectorStore && embedding) {
+			try {
+				await this._vectorStore.upsert({
+					uri: uriStr,
+					content,
+					embedding,
+					lastModified: now,
+					metadata: entry.metadata,
+				});
+			} catch (error) {
+				this.logService.warn(`[ContextService] Failed to store in vector store for ${uriStr}`, error);
+			}
+		}
+
+		// Also keep in-memory index for fallback
 		this._index.set(uriStr, entry);
 		this._onDidIndexFile.fire(uri);
 		this._indexSaveScheduler.schedule();
@@ -201,6 +266,16 @@ export class ContextService extends Disposable implements IContextService {
 
 	async removeFile(uri: URI): Promise<void> {
 		const uriStr = uri.toString();
+
+		// Remove from vector store if available
+		if (this._useVectorStore && this._vectorStore) {
+			try {
+				await this._vectorStore.delete(uriStr);
+			} catch (error) {
+				this.logService.warn(`[ContextService] Failed to delete from vector store for ${uriStr}`, error);
+			}
+		}
+
 		if (this._index.delete(uriStr)) {
 			this._onDidRemoveFile.fire(uri);
 			this._indexSaveScheduler.schedule();
@@ -216,6 +291,15 @@ export class ContextService extends Disposable implements IContextService {
 	}
 
 	async clearIndex(): Promise<void> {
+		// Clear vector store if available
+		if (this._useVectorStore && this._vectorStore) {
+			try {
+				await this._vectorStore.clear();
+			} catch (error) {
+				this.logService.warn('[ContextService] Failed to clear vector store', error);
+			}
+		}
+
 		this._index.clear();
 		await this.saveIndex();
 	}

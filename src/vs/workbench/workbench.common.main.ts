@@ -74,7 +74,7 @@ import './services/aiSettingsSearch/common/aiSettingsSearchService.js';
 import './services/ai/common/aiService.contribution.js';
 import './services/ai/common/contextService.contribution.js';
 import './services/ai/common/projectGraphService.contribution.js';
-import './services/ai/common/agentService.contribution.js';
+// agentService.contribution is loaded in workbench.desktop.main.ts (node-only)
 import './services/history/browser/historyService.js';
 import './services/activity/browser/activityService.js';
 import './services/keybinding/browser/keybindingService.js';
@@ -214,6 +214,7 @@ import './contrib/aiContext/browser/aiContext.contribution.js';
 
 // AI Commands
 import './contrib/aiCommands/browser/aiCommands.contribution.js';
+import './contrib/aiCommands/browser/aiModelsLanguageModelsBridge.contribution.js';
 
 // AI Agents
 import './contrib/aiAgents/browser/aiAgents.contribution.js';

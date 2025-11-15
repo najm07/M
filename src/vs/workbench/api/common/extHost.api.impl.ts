@@ -1492,6 +1492,26 @@ export function createApiFactoryAndRegisterActors(accessor: ServicesAccessor): I
 			registerSettingsSearchProvider(provider: vscode.SettingsSearchProvider) {
 				checkProposedApiEnabled(extension, 'aiSettingsSearch');
 				return extHostAiSettingsSearch.registerSettingsSearchProvider(extension, provider);
+			},
+			queryContext(query: vscode.ExtensionContextQuery, token?: vscode.CancellationToken): Thenable<vscode.ExtensionContextItem[]> {
+				checkProposedApiEnabled(extension, 'extensionBridge');
+				throw new Error('ai.queryContext is not yet implemented');
+			},
+			getContext(uri: vscode.Uri, symbol?: string, token?: vscode.CancellationToken): Thenable<vscode.ExtensionContextItem | undefined> {
+				checkProposedApiEnabled(extension, 'extensionBridge');
+				throw new Error('ai.getContext is not yet implemented');
+			},
+			contributeContext(item: vscode.ExtensionContextItem): void {
+				checkProposedApiEnabled(extension, 'extensionBridge');
+				throw new Error('ai.contributeContext is not yet implemented');
+			},
+			getRelatedContext(itemId: string, relationshipTypes?: string[], token?: vscode.CancellationToken): Thenable<vscode.ExtensionContextItem[]> {
+				checkProposedApiEnabled(extension, 'extensionBridge');
+				throw new Error('ai.getRelatedContext is not yet implemented');
+			},
+			registerContextProvider(provider: vscode.ExtensionContextProvider): vscode.Disposable {
+				checkProposedApiEnabled(extension, 'extensionBridge');
+				throw new Error('ai.registerContextProvider is not yet implemented');
 			}
 		};
 

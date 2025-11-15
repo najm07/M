@@ -4,11 +4,10 @@
  *--------------------------------------------------------------------------------------------*/
 
 import assert from 'assert';
-import { suite, test } from 'mocha';
-import { URI } from '../../../base/common/uri.js';
-import { CancellationToken } from '../../../base/common/cancellation.js';
-import { AICompletionRequest, IAIService } from './aiService.js';
-import { AIModelConfiguration } from './aiTypes.js';
+// import { URI } from '../../../base/common/uri.js';
+// import { CancellationToken } from '../../../base/common/cancellation.js';
+// import { AICompletionRequest, IAIService } from './aiService.js';
+// import { AIModelConfiguration } from './aiTypes.js';
 
 suite('AIService', () => {
 	test('getModels returns empty array when no models configured', async () => {

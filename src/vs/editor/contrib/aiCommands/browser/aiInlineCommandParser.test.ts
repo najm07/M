@@ -5,9 +5,9 @@
 
 import assert from 'assert';
 import { suite, test } from 'mocha';
-import { ITextModel } from '../../../../common/model.js';
-import { Position } from '../../../../common/core/position.js';
-import { AIInlineCommandParser } from './aiInlineCommandParser.js';
+// import { ITextModel } from '../../../common/model.js';
+// import { Position } from '../../../common/core/position.js';
+// import { AIInlineCommandParser } from './aiInlineCommandParser.js';
 
 suite('AIInlineCommandParser', () => {
 	test('parseCommands finds /fix command', () => {
